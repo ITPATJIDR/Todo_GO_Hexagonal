@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"golang.org/x/time/rate"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -24,7 +25,17 @@ var (
 )
 
 func main() {
-	err := godotenv.Load("local.env")
+
+	// Liveness Probe
+
+	_, err := os.Create("/tmp/live")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer os.Remove("/tmp/live")
+
+	err = godotenv.Load("local.env")
 	if err != nil {
 		log.Printf("please consider environment variables: %s", err)
 	}
@@ -38,10 +49,11 @@ func main() {
 
 	r := gin.Default()
 
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
+	r.GET("/limitz", limitedHandler)
+
+	// Readiness Probe
+	r.GET("/healthz", func(c *gin.Context) {
+		c.Status(200)
 	})
 
 	r.GET("/x", func(c *gin.Context) {
@@ -86,4 +98,17 @@ func main() {
 	if err := s.Shutdown(timeoutCtx); err != nil {
 		fmt.Println(err)
 	}
+}
+
+var limiter = rate.NewLimiter(5, 5)
+
+func limitedHandler(c *gin.Context) {
+	if !limiter.Allow() {
+		c.AbortWithStatus(http.StatusTooManyRequests)
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "pong",
+	})
 }
